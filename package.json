@@ -1,0 +1,10 @@
+{
+  "name": "cornhole-tournament",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pool play, bracket, and board dashboard for a cornhole tournament. Runs in the browser with no install.",
+  "scripts": {
+    "test": "node --test tests/",
+    "start": "python3 -m http.server 8000"
+  }
+}

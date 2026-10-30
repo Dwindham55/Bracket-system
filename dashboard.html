@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cornhole Dashboard</title>
+  <link rel="stylesheet" href="css/dashboard.css">
+</head>
+<body>
+  <header class="dhead">
+    <div><h1 id="dname">Cornhole Tournament</h1><div id="dphase" class="dim"></div></div>
+    <div id="dclock" class="clock"></div>
+  </header>
+  <div class="dtop">
+    <section class="dboards-wrap"><h2>On the boards</h2><div id="dboards" class="dboards"></div></section>
+    <aside class="dside"><h2>Up next</h2><div id="dupnext"></div></aside>
+  </div>
+  <section id="dbottom" class="dbottom"></section>
+  <div id="popup" class="popup"></div>
+  <div class="dcontrols">
+    <button id="soundBtn">🔇 Turn on sound</button>
+    <button id="fsBtn">⛶ Full screen</button>
+  </div>
+  <script src="js/logic.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/shared.js"></script>
+  <script src="js/dashboard.js"></script>
+</body>
+</html>

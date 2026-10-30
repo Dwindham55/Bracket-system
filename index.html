@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cornhole Tournament</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span id="tname"></span><small id="summary"></small></div>
+    <div class="top-actions">
+      <button id="undo" title="Undo the last change">↶ Undo</button>
+      <button id="openDash" class="primary">📺 Open TV dashboard</button>
+    </div>
+    <nav id="tabs"></nav>
+  </header>
+  <main id="main"></main>
+
+  <dialog id="scoreDialog">
+    <form id="scoreForm">
+      <h2>Enter score</h2>
+      <p id="scoreStage" class="muted"></p>
+      <div class="score-row"><label for="scoreA" id="nameA"></label><input id="scoreA" type="number" min="0" max="99" inputmode="numeric" required></div>
+      <div class="score-row"><label for="scoreB" id="nameB"></label><input id="scoreB" type="number" min="0" max="99" inputmode="numeric" required></div>
+      <div class="dialog-actions">
+        <button type="button" id="clearScore" class="ghost danger">Clear result</button>
+        <span class="spacer"></span>
+        <button type="button" id="cancelScore">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+  <div id="toast"></div>
+
+  <script src="js/logic.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/shared.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>
