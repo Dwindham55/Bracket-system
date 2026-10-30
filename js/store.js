@@ -60,7 +60,7 @@
 
   // The admin side: owns the state, undo history and outgoing sync.
   function createAdminStore(Logic) {
-    let state = read() || Logic.newState();
+    let state = Logic.migrate(read() || Logic.newState());
     const undo = [];
     const subscribers = [];
     const windows = new Set();
@@ -91,7 +91,7 @@
       if (e.key !== KEY) return;
       const next = read();
       if (!next) return;
-      state = next;
+      state = Logic.migrate(next);
       subscribers.forEach((fn) => fn(state));
     });
 

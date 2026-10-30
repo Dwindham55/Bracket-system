@@ -107,6 +107,7 @@ test('scheduler fills boards across pools and never double-books a team', () => 
 
 test('teams not checked in are skipped by auto-calling', () => {
   const s = setup([3], 2);
+  s.settings.useCheckIn = true;
   L.setCheckedIn(s, s.pools[0].teamIds[1], false);
   L.fillBoards(s);
   const called = s.games.filter((g) => g.status === 'called');
@@ -173,4 +174,38 @@ test('removing a board sends its game back to the queue', () => {
   L.fillBoards(s);
   L.setBoardCount(s, 1);
   assert.equal(s.games.filter((g) => g.status === 'called').length, 1);
+});
+
+test('check-in is ignored unless it is turned on', () => {
+  const s = setup([3], 2);
+  L.setCheckedIn(s, s.pools[0].teamIds[1], false);
+  assert.equal(L.fillBoards(s), 1);
+  assert.equal(L.game(s, s.games.find((g) => g.status === 'called').id).order, 0);
+});
+
+test('teams get numbers and player names', () => {
+  const s = L.newState();
+  const a = L.addTeam(s, 'Dave Smith, Tripp Jones');
+  const b = L.addTeam(s, 'Chris & Stewart');
+  const c = L.addTeam(s, 'Sharpshooters: Clint, David P');
+  const d = L.addTeam(s, 'The Bag Slingers');
+  assert.deepEqual([a, b, c, d].map((t) => t.number), [1, 2, 3, 4]);
+  assert.deepEqual(a.players, ['Dave Smith', 'Tripp Jones']);
+  assert.equal(L.teamLabel(a), 'Dave Smith & Tripp Jones');
+  assert.deepEqual([c.name, c.players], ['Sharpshooters', ['Clint', 'David P']]);
+  assert.deepEqual([d.name, d.players], ['The Bag Slingers', []]);
+  assert.throws(() => L.addTeam(s, 'chris and stewart'), /already/);
+  L.updateTeam(s, b.id, { players: ['Chris', 'Stewart', ''] });
+  assert.deepEqual(b.players, ['Chris', 'Stewart']);
+  L.removeTeam(s, a.id);
+  assert.equal(L.addTeam(s, 'New, Pair').number, 5);
+});
+
+test('older saved tournaments are upgraded', () => {
+  const old = { settings: { poolCount: 1 }, teams: [{ id: 'x', name: 'Old Team', checkedIn: false }], pools: [], games: [], boards: [] };
+  L.migrate(old);
+  assert.equal(old.teams[0].number, 1);
+  assert.deepEqual(old.teams[0].players, []);
+  assert.equal(old.settings.useCheckIn, false);
+  assert.equal(old.settings.maxPoolSize, 5);
 });

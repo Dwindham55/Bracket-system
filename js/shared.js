@@ -8,9 +8,30 @@
     return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   }
 
+  // "#7 Dave & Tripp": number plus name, for lists and tables.
   function teamName(state, id) {
     const t = id && L.team(state, id);
-    return t ? t.name : 'TBD';
+    return t ? '#' + t.number + ' ' + L.teamLabel(t) : 'TBD';
+  }
+
+  // Big two-line block for boards and the pop-up: number + team name, then
+  // the players underneath when the team also has a name of its own.
+  function teamBlock(state, id, cls = 'tb') {
+    const t = id && L.team(state, id);
+    if (!t) return '<div class="' + cls + '"><span class="' + cls + '-name">TBD</span></div>';
+    const players = t.name && t.players.length ? '<div class="' + cls + '-players">' + esc(t.players.join(' & ')) + '</div>' : '';
+    return (
+      '<div class="' + cls + '"><div class="' + cls + '-line"><span class="' + cls + '-num">#' + t.number + '</span><span class="' +
+      cls + '-name">' + esc(L.teamLabel(t)) + '</span></div>' + players + '</div>'
+    );
+  }
+
+  // How the announcer says a team: "team 7, Dave and Tripp".
+  function spokenName(state, id) {
+    const t = L.team(state, id);
+    if (!t) return '';
+    const who = t.players.length ? t.players.join(' and ') : t.name;
+    return 'team ' + t.number + ', ' + who;
   }
 
   function boardName(state, id) {
@@ -128,5 +149,5 @@
     }
   }
 
-  root.UI = { esc, teamName, boardName, letterOf, gameStage, matchup, fmtDiff, standingsTable, bracketHTML, chime, speak };
+  root.UI = { esc, teamName, teamBlock, spokenName, boardName, letterOf, gameStage, matchup, fmtDiff, standingsTable, bracketHTML, chime, speak };
 })(window);

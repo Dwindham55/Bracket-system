@@ -33,8 +33,7 @@
         if (!g) return '<div class="dboard open"><div class="dboard-name">' + esc(b.name) + '</div><div class="open-label">OPEN</div></div>';
         return (
           '<div class="dboard busy"><div class="dboard-name">' + esc(b.name) + '<span>' + minutesSince(g.calledAt) + '</span></div>' +
-          '<div class="dteam">' + esc(U.teamName(s, g.teamA)) + '</div><div class="dvs">vs</div>' +
-          '<div class="dteam">' + esc(U.teamName(s, g.teamB)) + '</div>' +
+          U.teamBlock(s, g.teamA, 'dteam') + '<div class="dvs">vs</div>' + U.teamBlock(s, g.teamB, 'dteam') +
           '<div class="dstage">' + esc(U.gameStage(s, g)) + '</div></div>'
         );
       })
@@ -107,13 +106,13 @@
     const next = L.queue(s).find((x) => x.game.teamA && x.game.teamB);
     $('#popup').innerHTML =
       '<div class="pop"><div class="pop-label">NOW CALLING</div><div class="pop-board">' + esc(boardName) + '</div>' +
-      '<div class="pop-team">' + esc(U.teamName(s, g.teamA)) + '</div><div class="pop-vs">vs</div>' +
-      '<div class="pop-team">' + esc(U.teamName(s, g.teamB)) + '</div><div class="pop-stage">' + esc(U.gameStage(s, g)) + '</div>' +
+      U.teamBlock(s, g.teamA, 'pop-team') + '<div class="pop-vs">vs</div>' +
+      U.teamBlock(s, g.teamB, 'pop-team') + '<div class="pop-stage">' + esc(U.gameStage(s, g)) + '</div>' +
       (next ? '<div class="pop-next">Up next: ' + U.matchup(s, next.game) + ' — get ready!</div>' : '') + '</div>';
     $('#popup').classList.add('show');
     if (soundOn) {
       U.chime();
-      setTimeout(() => U.speak('Now calling to ' + boardName + '. ' + U.teamName(s, g.teamA) + ', versus, ' + U.teamName(s, g.teamB) + '.'), 700);
+      setTimeout(() => U.speak('Now calling to ' + boardName + '. ' + U.spokenName(s, g.teamA) + '. Versus, ' + U.spokenName(s, g.teamB) + '.'), 700);
     }
     setTimeout(() => {
       $('#popup').classList.remove('show');
@@ -125,7 +124,8 @@
   }
 
   window.Store.listen((s) => {
-    state = s;
+    state = L.migrate(s);
+    s = state;
     const anns = s.announcements || [];
     if (seen === null) {
       // Don't replay calls that happened before the dashboard was opened.

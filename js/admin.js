@@ -9,16 +9,17 @@
   const $ = (sel, el = document) => el.querySelector(sel);
 
   const TABS = [
-    ['live', 'Boards & Queue'],
-    ['teams', 'Teams'],
-    ['pools', 'Pools'],
-    ['bracket', 'Bracket'],
-    ['settings', 'Settings'],
+    ['setup', '1. Setup'],
+    ['teams', '2. Teams'],
+    ['pools', '3. Pools'],
+    ['live', '4. Boards & Queue'],
+    ['bracket', '5. Bracket'],
   ];
 
-  let tab = 'live';
+  let tab = store.state.teams.length ? 'live' : 'setup';
   try {
-    tab = localStorage.getItem('cornhole-admin-tab') || 'live';
+    const saved = localStorage.getItem('cornhole-admin-tab');
+    if (saved && TABS.some(([id]) => id === saved)) tab = saved;
   } catch (e) {}
   // Seed order the director has hand-edited on the Bracket tab, or null to
   // follow the live standings.
@@ -70,12 +71,12 @@
   function renderHeader(s) {
     document.title = s.name + ' · Control';
     $('#tname').textContent = s.name;
-    const here = s.teams.filter((t) => t.checkedIn).length;
+    const here = s.settings.useCheckIn ? ' (' + s.teams.filter((t) => t.checkedIn).length + ' checked in)' : '';
     const poolGames = s.games.filter((g) => g.stage === 'pool' && g.status !== 'skipped');
     const done = poolGames.filter((g) => g.status === 'done').length;
     const inUse = s.boards.length - L.freeBoards(s).length;
     $('#summary').textContent =
-      s.teams.length + ' teams (' + here + ' checked in) · ' + done + '/' + poolGames.length + ' pool games · ' +
+      s.teams.length + ' teams' + here + ' · ' + done + '/' + poolGames.length + ' pool games · ' +
       inUse + '/' + s.boards.length + ' boards in use';
     $('#tabs').innerHTML = TABS.map(
       ([id, label]) => '<button data-act="tab" data-id="' + id + '" class="' + (id === tab ? 'on' : '') + '">' + label + '</button>'
@@ -105,7 +106,7 @@
         html +=
           '<div class="board busy"><div class="board-head"><h3>' + esc(b.name) + '</h3><span class="muted">' + minutesSince(g.calledAt) + '</span></div>' +
           '<div class="stage">' + esc(U.gameStage(s, g)) + '</div>' +
-          '<div class="teams">' + U.matchup(s, g) + '</div>' +
+          '<div class="teams">' + U.teamBlock(s, g.teamA) + '<div class="vs">vs</div>' + U.teamBlock(s, g.teamB) + '</div>' +
           '<div class="actions"><button class="primary" data-act="score" data-id="' + g.id + '">Enter score</button>' +
           '<button data-act="announce" data-id="' + g.id + '" title="Show the pop-up on the TV again">Re-announce</button>' +
           '<button class="ghost" data-act="unassign" data-id="' + g.id + '" title="Take this game off the board and put it back in the queue">Cancel</button></div></div>';
@@ -126,7 +127,7 @@
     if (!q.length) {
       html += '<p class="muted">' + (s.games.length ? 'Nothing waiting.' : 'Add teams to pools to build the schedule.') + '</p>';
     } else {
-      html += '<table class="list"><thead><tr><th>#</th><th>Game</th><th>Teams</th><th>Status</th><th></th></tr></thead><tbody>';
+      html += '<div class="table-scroll"><table class="list"><thead><tr><th>#</th><th>Game</th><th>Teams</th><th>Status</th><th></th></tr></thead><tbody>';
       q.slice(0, 60).forEach((x, i) => {
         const g = x.game;
         html +=
@@ -138,7 +139,7 @@
           (g.teamA && g.teamB ? '<button class="ghost" data-act="score" data-id="' + g.id + '" title="Enter a score without putting it on a board">Score</button>' : '') +
           '</td></tr>';
       });
-      html += '</tbody></table>';
+      html += '</tbody></table></div>';
     }
     html += '</section><section><h2>Recent results</h2>';
     const recent = s.games.filter((g) => g.status === 'done').sort((a, b) => b.finishedAt - a.finishedAt).slice(0, 15);
@@ -162,32 +163,43 @@
     const records = new Map();
     for (const p of s.pools) for (const r of L.poolStandings(s, p.id)) records.set(r.teamId, r);
     const poolOpts = [['', '— none —'], ...s.pools.map((p) => [p.id, p.name])];
+    const checkIn = s.settings.useCheckIn;
 
     let html =
-      '<div class="cols"><section><h2>Add a team</h2>' +
-      '<form class="inline" data-form="addTeam"><input id="newTeam" placeholder="Team name, e.g. Dave & Tripp" autocomplete="off">' +
-      '<label><input type="checkbox" id="newHere"' + (addChecked ? ' checked' : '') + '> Checked in</label><button class="primary">Add team</button></form>' +
-      '<details><summary>Add many at once</summary><form data-form="addBulk"><textarea id="bulk" rows="8" placeholder="One team per line"></textarea>' +
-      '<label><input type="checkbox" id="bulkHere"> Mark these as checked in</label> <button>Add all</button></form></details>' +
-      '<p class="muted">Enter teams ahead of time and leave them unchecked; check them in as they arrive. Teams that show up late can be added here any time and dropped into a pool.</p>' +
-      '</section></div>';
+      '<section><h2>Add a team</h2>' +
+      '<form class="add-team" data-form="addTeam">' +
+      '<label class="field">Player 1<input id="newP1" placeholder="e.g. Dave Smith" autocomplete="off"></label>' +
+      '<label class="field">Player 2<input id="newP2" placeholder="e.g. Tripp Jones" autocomplete="off"></label>' +
+      '<label class="field">Team name <span class="muted">(optional)</span><input id="newName" placeholder="e.g. Bag Slingers" autocomplete="off"></label>' +
+      (checkIn ? '<label><input type="checkbox" id="newHere"' + (addChecked ? ' checked' : '') + '> Here now</label>' : '') +
+      '<button class="primary big">Add team #' + (Math.max(0, ...s.teams.map((t) => t.number)) + 1) + '</button></form>' +
+      '<details><summary>Paste a list of teams</summary><form data-form="addBulk">' +
+      '<p class="muted">One team per line, players separated by a comma. Examples:<br><code>Dave Smith, Tripp Jones</code><br><code>Bag Slingers: Chris, Stewart</code></p>' +
+      '<textarea id="bulk" rows="8" placeholder="Dave Smith, Tripp Jones"></textarea>' +
+      (checkIn ? '<label><input type="checkbox" id="bulkHere"> Mark these as here</label>' : '') +
+      ' <button>Add all</button></form></details>' +
+      '<p class="muted">Every team gets a number automatically. You can add teams any time, even after games have started.</p></section>';
 
-    html +=
-      '<section><div class="section-head"><h2>Teams (' + s.teams.length + ')</h2><input type="search" id="teamFilter" placeholder="Search teams"></div>';
+    html += '<section><div class="section-head"><h2>Teams (' + s.teams.length + ')</h2><input type="search" id="teamFilter" placeholder="Search names"></div>';
     if (!s.teams.length) return html + '<p class="muted">No teams yet.</p></section>';
-    html += '<table class="list" id="teamTable"><thead><tr><th>Here</th><th>Team</th><th>Pool</th><th>Record</th><th></th></tr></thead><tbody>';
-    const sorted = [...s.teams].sort((a, b) => a.name.localeCompare(b.name));
+    html += '<div class="table-scroll"><table class="list" id="teamTable"><thead><tr><th>#</th>' + (checkIn ? '<th>Here</th>' : '') +
+      '<th>Player 1</th><th>Player 2</th><th>Team name</th><th>Pool</th><th>Record</th><th></th></tr></thead><tbody>';
+    const sorted = [...s.teams].sort((a, b) => a.number - b.number);
     for (const t of sorted) {
       const p = L.poolOfTeam(s, t.id);
       const r = records.get(t.id);
+      const search = [t.number, t.name, ...t.players].join(' ').toLowerCase();
+      const field = (key, value, ph) =>
+        '<td><input class="plain" value="' + esc(value || '') + '" placeholder="' + ph + '" data-change="teamField" data-key="' + key + '" data-id="' + t.id + '"></td>';
       html +=
-        '<tr data-name="' + esc(t.name.toLowerCase()) + '"><td><input type="checkbox" data-change="checkin" data-id="' + t.id + '"' + (t.checkedIn ? ' checked' : '') + '></td>' +
-        '<td><input class="plain" value="' + esc(t.name) + '" data-change="renameTeam" data-id="' + t.id + '"></td>' +
+        '<tr data-name="' + esc(search) + '"><td class="num"><b>' + t.number + '</b></td>' +
+        (checkIn ? '<td><input type="checkbox" data-change="checkin" data-id="' + t.id + '"' + (t.checkedIn ? ' checked' : '') + '></td>' : '') +
+        field('p0', t.players[0], 'Player 1') + field('p1', t.players[1], 'Player 2') + field('name', t.name, '—') +
         '<td><select data-change="teamPool" data-id="' + t.id + '">' + options(poolOpts, p ? p.id : '') + '</select></td>' +
         '<td class="num">' + (r && r.played ? r.wins + '–' + r.losses + ' (' + U.fmtDiff(r.diff) + ')' : '') + '</td>' +
         '<td class="row-actions"><button class="ghost danger" data-act="delTeam" data-id="' + t.id + '">Remove</button></td></tr>';
     }
-    return html + '</tbody></table></section>';
+    return html + '</tbody></table></div></section>';
   }
 
   // ---------- Pools ----------
@@ -195,18 +207,18 @@
   function renderPools(s) {
     const assigned = new Set(s.pools.flatMap((p) => p.teamIds));
     const unassigned = s.teams.filter((t) => !assigned.has(t.id));
-    const unOpts = unassigned.map((t) => [t.id, t.name + (t.checkedIn ? '' : ' (not checked in)')]);
+    const unOpts = unassigned.map((t) => [t.id, U.teamName(s, t.id) + (s.settings.useCheckIn && !t.checkedIn ? ' (not checked in)' : '')]);
 
     let html =
       '<div class="toolbar">' +
       '<label>Pools <input type="number" min="1" max="32" class="short" value="' + s.settings.poolCount + '" data-change="poolCount"></label>' +
-      '<label>Max teams per pool <input type="number" min="2" max="12" class="short" value="' + s.settings.maxPoolSize + '" data-change="maxPool"></label>' +
+      '<label>Teams per pool (most) <input type="number" min="2" max="12" class="short" value="' + s.settings.maxPoolSize + '" data-change="maxPool"></label>' +
       '<button class="primary" data-act="autoAssign"' + (unassigned.length ? '' : ' disabled') + '>Auto-fill pools</button>' +
-      '<label><input type="checkbox" id="autoHere" checked> checked-in teams only</label></div>';
+      (s.settings.useCheckIn ? '<label><input type="checkbox" id="autoHere" checked> checked-in teams only</label>' : '') + '</div>';
 
     html += '<div class="unassigned"><b>Not in a pool (' + unassigned.length + '):</b> ' +
       (unassigned.length
-        ? unassigned.map((t) => '<span class="chip' + (t.checkedIn ? '' : ' away') + '">' + esc(t.name) + '</span>').join(' ')
+        ? unassigned.map((t) => '<span class="chip' + (s.settings.useCheckIn && !t.checkedIn ? ' away' : '') + '">' + esc(U.teamName(s, t.id)) + '</span>').join(' ')
         : '<span class="muted">everyone is placed</span>') + '</div>';
 
     html += '<div class="pools">';
@@ -220,7 +232,7 @@
       p.teamIds.forEach((id, i) => {
         const t = L.team(s, id);
         html +=
-          '<li><span class="letter">' + L.LETTERS[i] + '</span><span class="name' + (t.checkedIn ? '' : ' away') + '">' + esc(t.name) + '</span>' +
+          '<li><span class="letter">' + L.LETTERS[i] + '</span><span class="name' + (s.settings.useCheckIn && !t.checkedIn ? ' away' : '') + '">' + esc(U.teamName(s, id)) + '</span>' +
           '<span class="row-actions"><button class="icon" data-act="poolMove" data-id="' + id + '" data-pool="' + p.id + '" data-dir="-1" title="Move up">↑</button>' +
           '<button class="icon" data-act="poolMove" data-id="' + id + '" data-pool="' + p.id + '" data-dir="1" title="Move down">↓</button>' +
           '<button class="icon danger" data-act="poolRemove" data-id="' + id + '" title="Take out of pool">✕</button></span></li>';
@@ -299,25 +311,45 @@
     html += '</tbody></table>';
     const rest = s.teams.filter((t) => !ids.includes(t.id));
     if (rest.length) {
-      html += '<select data-change="seedAdd"><option value="">+ Add a team to the bracket…</option>' + options(rest.map((t) => [t.id, t.name])) + '</select>';
+      html += '<select data-change="seedAdd"><option value="">+ Add a team to the bracket…</option>' + options(rest.map((t) => [t.id, U.teamName(s, t.id)])) + '</select>';
     }
     html += '<div class="toolbar"><button class="primary big" data-act="createBracket"' + (ids.length >= 2 ? '' : ' disabled') + '>Create bracket</button></div></section>';
     return html;
   }
 
-  // ---------- Settings ----------
+  // ---------- Setup ----------
 
-  function renderSettings(s) {
+  function renderSetup(s) {
+    const num = (label, key, value, min, max, help) =>
+      '<label class="field big-field">' + label + '<input type="number" min="' + min + '" max="' + max + '" class="short" value="' + value +
+      '" data-change="' + key + '">' + (help ? '<span class="muted">' + help + '</span>' : '') + '</label>';
     let html =
-      '<div class="cols"><section><h2>Tournament</h2>' +
-      '<label class="field">Name <input value="' + esc(s.name) + '" data-change="tname"></label>' +
-      '<label class="field">Cap on point differential per game (0 = no cap) <input type="number" min="0" max="99" class="short" value="' + (s.settings.diffCap || 0) + '" data-change="diffCap"></label>' +
-      '<h2>Boards</h2><label class="field">Number of boards <input type="number" min="1" max="64" class="short" value="' + s.boards.length + '" data-change="boardCount"></label>' +
-      '<div class="board-names">' +
+      '<div class="cols"><section><h2>Your tournament</h2>' +
+      '<label class="field big-field">Tournament name <input value="' + esc(s.name) + '" data-change="tname"></label>' +
+      '<div class="setup-nums">' +
+      num('Number of boards', 'boardCount', s.boards.length, 1, 64, 'Sets of boards you are playing on') +
+      num('Number of pools', 'poolCount', s.settings.poolCount, 1, 32, 'Groups that play each other first') +
+      num('Teams per pool (most)', 'maxPool', s.settings.maxPoolSize, 2, 12, 'Pools can have fewer; unused games are skipped') +
+      '</div>' +
+      '<h2>Board names</h2><div class="board-names">' +
       s.boards.map((b) => '<input value="' + esc(b.name) + '" data-change="boardName" data-id="' + b.id + '">').join('') +
-      '</div><p class="muted">Rename a board to match the number or sign on it. Removing a board puts its game back in the queue.</p></section>';
+      '</div><p class="muted">Change these to match the numbers on your boards.</p>' +
+      '<h2>Options</h2>' +
+      '<label class="field"><span><input type="checkbox" data-change="useCheckIn"' + (s.settings.useCheckIn ? ' checked' : '') +
+      '> Use check-in</span><span class="muted">Turn this on if you enter teams ahead of time and want to mark who actually showed up. Teams not marked "here" are not called to boards.</span></label>' +
+      num('Most points one game can add to differential (0 = no limit)', 'diffCap', s.settings.diffCap || 0, 0, 99) +
+      '</section>';
     html +=
-      '<section><h2>Backup</h2><p class="muted">Everything saves automatically in this browser. Download a backup now and then, or to move the tournament to another computer.</p>' +
+      '<section><h2>How to run the day</h2><ol class="steps">' +
+      '<li><b>Setup</b> (this page): enter boards, pools and teams per pool.</li>' +
+      '<li><b>Teams</b>: type in each pair of players. Each team gets a number.</li>' +
+      '<li><b>Pools</b>: press <i>Auto-fill pools</i> to split the teams up.</li>' +
+      '<li>Press <b>📺 Open TV dashboard</b> (top right) and drag that window onto the TV.</li>' +
+      '<li><b>Boards &amp; Queue</b>: press <i>Fill open boards</i>. When a game ends, press <i>Enter score</i>. The next game is called automatically.</li>' +
+      '<li><b>Bracket</b>: when pools are done, press <i>Create bracket</i> and keep entering scores the same way.</li></ol>' +
+      '<p class="muted">Made a mistake? Press <b>↶ Undo</b> at the top.</p>' +
+      '<h2>Saving</h2><p class="muted">Everything saves by itself on this computer, in this web browser. ' +
+      'To move a tournament to a different computer, download a backup here and restore it there.</p>' +
       '<div class="toolbar"><button data-act="export">Download backup</button><label class="button">Restore from backup<input type="file" accept=".json,application/json" data-change="import" hidden></label></div>' +
       '<h2>Start over</h2><div class="toolbar"><button class="ghost danger" data-act="resetKeepTeams">New tournament, keep team list</button>' +
       '<button class="ghost danger" data-act="resetAll">Erase everything</button></div></section></div>';
@@ -329,7 +361,7 @@
   function render() {
     const s = store.state;
     renderHeader(s);
-    const view = { live: renderLive, teams: renderTeams, pools: renderPools, bracket: renderBracket, settings: renderSettings }[tab] || renderLive;
+    const view = { setup: renderSetup, live: renderLive, teams: renderTeams, pools: renderPools, bracket: renderBracket }[tab] || renderLive;
     const main = $('#main');
     const scroll = window.scrollY;
     main.innerHTML = view(s);
@@ -425,7 +457,7 @@
       const s = store.state;
       const t = L.team(s, d.id);
       const played = L.playedPoolGames(s, d.id);
-      const msg = 'Remove ' + t.name + '?' + (played ? ' Their ' + played + ' finished pool game(s) will be deleted too.' : '');
+      const msg = 'Remove ' + U.teamName(s, t.id) + '?' + (played ? ' Their ' + played + ' finished pool game(s) will be deleted too.' : '');
       if (confirmIt(msg)) act((st) => L.removeTeam(st, d.id), 'Team removed');
     },
     poolMove(d) {
@@ -438,7 +470,7 @@
       act((st) => L.assignTeamToPool(st, d.id, null));
     },
     autoAssign() {
-      const onlyHere = $('#autoHere').checked;
+      const onlyHere = !!$('#autoHere') && $('#autoHere').checked;
       act(
         (s) => L.autoAssign(s, onlyHere),
         (r) => 'Placed ' + r.placed + ' team' + (r.placed === 1 ? '' : 's') + (r.left ? ' · ' + r.left + ' did not fit (pools are full)' : '')
@@ -485,7 +517,7 @@
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     },
     resetKeepTeams() {
-      if (!confirmIt('Start a new tournament? Pools, games and the bracket are cleared. Teams stay, marked not checked in.')) return;
+      if (!confirmIt('Start a new tournament? Pools, games and the bracket are cleared. The team list stays.')) return;
       const old = store.state;
       const s = L.newState();
       s.name = old.name;
@@ -493,7 +525,7 @@
       s.pools = [];
       L.ensurePools(s);
       s.boards = old.boards;
-      s.teams = old.teams.map((t) => ({ ...t, checkedIn: false }));
+      s.teams = old.teams.map((t) => ({ ...t, checkedIn: !old.settings.useCheckIn }));
       store.replace(s);
       toast('New tournament started');
     },
@@ -514,8 +546,20 @@
     checkin(d, el) {
       act((s) => L.setCheckedIn(s, d.id, el.checked));
     },
-    renameTeam(d, el) {
-      act((s) => L.renameTeam(s, d.id, el.value));
+    teamField(d, el) {
+      act((s) => {
+        const t = L.team(s, d.id);
+        if (d.key === 'name') return L.updateTeam(s, d.id, { name: el.value });
+        const players = t.players.slice();
+        players[d.key === 'p0' ? 0 : 1] = el.value;
+        L.updateTeam(s, d.id, { players });
+      });
+    },
+    useCheckIn(d, el) {
+      act((s) => {
+        s.settings.useCheckIn = el.checked;
+        if (el.checked) for (const t of s.teams) t.checkedIn = true;
+      });
     },
     teamPool(d, el) {
       act((s) => L.assignTeamToPool(s, d.id, el.value || null));
@@ -577,7 +621,7 @@
           const s = JSON.parse(text);
           if (!s || !Array.isArray(s.teams) || !Array.isArray(s.games) || !Array.isArray(s.pools)) throw new Error();
           if (!confirmIt('Replace the current tournament with this backup?')) return;
-          store.replace(s);
+          store.replace(L.migrate(s));
           toast('Backup restored');
         } catch (e) {
           toast('That file is not a tournament backup.', true);
@@ -632,14 +676,13 @@
     if (!form) return;
     e.preventDefault();
     if (form.dataset.form === 'addTeam') {
-      const name = $('#newTeam').value;
-      if (!name.trim()) return;
-      refocus = '#newTeam';
-      addChecked = $('#newHere').checked;
-      addTeams([name], addChecked);
+      const info = { name: $('#newName').value, players: [$('#newP1').value, $('#newP2').value] };
+      if ($('#newHere')) addChecked = $('#newHere').checked;
+      refocus = '#newP1';
+      addTeams([info], addChecked);
     } else if (form.dataset.form === 'addBulk') {
       const lines = $('#bulk').value.split('\n').map((x) => x.trim()).filter(Boolean);
-      addTeams(lines, $('#bulkHere').checked);
+      addTeams(lines, !!$('#bulkHere') && $('#bulkHere').checked);
     }
   });
 

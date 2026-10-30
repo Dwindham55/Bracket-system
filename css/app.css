@@ -73,7 +73,7 @@ input.plain.h3 { font-weight: 700; font-size: 1rem; padding-left: .2rem; }
 textarea { width: 100%; }
 label { display: inline-flex; align-items: center; gap: .4rem; }
 label.field { display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; margin-bottom: .8rem; }
-label.field input:not(.short) { width: 100%; max-width: 26rem; }
+label.field input:not(.short):not([type=checkbox]) { width: 100%; max-width: 26rem; }
 
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; margin: .4rem 0 1rem; }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
@@ -181,3 +181,26 @@ dialog h2 { margin-top: 0; }
   table.list th:nth-child(1), table.list td:nth-child(1) { padding-right: .2rem; }
   .row-actions select { max-width: 6rem; }
 }
+
+/* team blocks on board cards */
+.tb { line-height: 1.25; }
+.tb-line { display: flex; align-items: baseline; gap: .4rem; }
+.tb-num { font-size: .8rem; font-weight: 800; color: #fff; background: var(--brand); border-radius: 6px; padding: 0 .35rem; }
+.tb-name { font-weight: 700; }
+.tb-players { font-size: .85rem; font-weight: 500; color: var(--muted); margin-left: 2.1rem; }
+.board .teams .vs { margin: .2rem 0 .2rem 2.1rem; display: block; }
+
+/* add team & setup */
+.add-team { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .6rem 1rem; }
+.add-team .field { margin: 0; flex: 1; min-width: 12rem; }
+.add-team .field input { width: 100%; }
+code { background: var(--brand-soft); padding: 0 .3rem; border-radius: 4px; }
+.setup-nums { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0 1rem; }
+.big-field { font-weight: 600; }
+.big-field input { font-size: 1.15rem; }
+.big-field input.short { width: 6rem; }
+.big-field .muted { font-weight: 400; font-size: .82rem; }
+.steps li { margin-bottom: .5rem; }
+
+.table-scroll { overflow-x: auto; }
+.table-scroll table.list input.plain { min-width: 7rem; }

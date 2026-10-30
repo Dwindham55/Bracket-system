@@ -32,6 +32,7 @@
         wildcards: 0,
         diffCap: 0,
         autoCall: true,
+        useCheckIn: false,
       },
       boards: [],
       teams: [],
@@ -42,6 +43,21 @@
     };
     setBoardCount(state, 4);
     ensurePools(state);
+    return state;
+  }
+
+  // Bring a saved tournament from an older version up to date.
+  function migrate(state) {
+    const fresh = newState();
+    state.settings = Object.assign({}, fresh.settings, state.settings);
+    if (state.settings.useCheckIn === undefined) state.settings.useCheckIn = false;
+    state.announcements = state.announcements || [];
+    let next = Math.max(0, ...state.teams.map((t) => t.number || 0)) + 1;
+    for (const t of state.teams) {
+      if (!t.number) t.number = next++;
+      if (!Array.isArray(t.players)) t.players = [];
+      if (t.name === undefined) t.name = '';
+    }
     return state;
   }
 
@@ -90,25 +106,52 @@
 
   // ---------- teams ----------
 
-  function addTeam(state, name, checkedIn = true) {
-    name = String(name || '').trim().replace(/\s+/g, ' ');
-    if (!name) fail('Enter a team name.');
-    if (state.teams.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
-      fail('There is already a team named "' + name + '".');
+  const clean = (v) => String(v || '').trim().replace(/\s+/g, ' ');
+
+  // What a team is called on screen: its team name, or else its players.
+  function teamLabel(t) {
+    if (!t) return 'TBD';
+    return t.name || t.players.filter(Boolean).join(' & ') || 'Team ' + t.number;
+  }
+
+  // Read one typed line into a team. Accepts "Dave Smith, Tripp Jones",
+  // "Dave & Tripp", "Sharpshooters: Dave, Tripp", or just "Sharpshooters".
+  function parseTeamLine(line) {
+    line = clean(line);
+    let name = '';
+    let rest = line;
+    const colon = line.indexOf(':');
+    if (colon >= 0) {
+      name = clean(line.slice(0, colon));
+      rest = line.slice(colon + 1);
     }
-    const t = { id: uid(), name, checkedIn: !!checkedIn, createdAt: Date.now() };
+    const players = rest.split(/\s*(?:,|\/|&|\band\b|\+)\s*/i).map(clean).filter(Boolean);
+    if (colon < 0 && players.length < 2) return { name: line, players: [] };
+    return { name, players };
+  }
+
+  function checkTeamInfo(state, info, teamId) {
+    const name = clean(info.name);
+    const players = (info.players || []).map(clean).filter(Boolean).slice(0, 4);
+    if (!name && !players.length) fail('Enter the players’ names or a team name.');
+    const label = teamLabel({ name, players }).toLowerCase();
+    const dupe = state.teams.find((o) => o.id !== teamId && teamLabel(o).toLowerCase() === label);
+    if (dupe) fail('Team #' + dupe.number + ' is already called "' + teamLabel(dupe) + '".');
+    return { name, players };
+  }
+
+  function addTeam(state, info, checkedIn = true) {
+    if (typeof info === 'string') info = parseTeamLine(info);
+    const { name, players } = checkTeamInfo(state, info);
+    const number = Math.max(0, ...state.teams.map((t) => t.number || 0)) + 1;
+    const t = { id: uid(), number, name, players, checkedIn: !!checkedIn || !state.settings.useCheckIn, createdAt: Date.now() };
     state.teams.push(t);
     return t;
   }
 
-  function renameTeam(state, teamId, name) {
+  function updateTeam(state, teamId, info) {
     const t = team(state, teamId) || fail('Team not found.');
-    name = String(name || '').trim().replace(/\s+/g, ' ');
-    if (!name) fail('Team name cannot be empty.');
-    if (state.teams.some((o) => o.id !== teamId && o.name.toLowerCase() === name.toLowerCase())) {
-      fail('There is already a team named "' + name + '".');
-    }
-    t.name = name;
+    Object.assign(t, checkTeamInfo(state, { name: t.name, players: t.players, ...info }, teamId));
   }
 
   function setCheckedIn(state, teamId, checkedIn) {
@@ -216,7 +259,7 @@
     const from = poolOfTeam(state, teamId);
     const to = poolId ? pool(state, poolId) || fail('Pool not found.') : null;
     if (from === to) return;
-    if (teamInBracket(state, teamId)) fail(t.name + ' is in the bracket. Reset the bracket first.');
+    if (teamInBracket(state, teamId)) fail(teamLabel(t) + ' is in the bracket. Reset the bracket first.');
     if (to && to.teamIds.length >= state.settings.maxPoolSize) {
       fail(to.name + ' is full (' + state.settings.maxPoolSize + ' teams).');
     }
@@ -224,7 +267,7 @@
       const onBoard = state.games.find(
         (g) => g.status === 'called' && g.poolId === from.id && (g.teamA === teamId || g.teamB === teamId)
       );
-      if (onBoard) fail(t.name + ' is playing right now. Finish or cancel that game first.');
+      if (onBoard) fail(teamLabel(t) + ' is playing right now. Finish or cancel that game first.');
       from.teamIds = from.teamIds.filter((id) => id !== teamId);
       syncPoolGames(state, from);
     }
@@ -246,7 +289,7 @@
   // Put unassigned teams into the emptiest pools. Returns how many were placed.
   function autoAssign(state, onlyCheckedIn = true) {
     const assigned = new Set(state.pools.flatMap((p) => p.teamIds));
-    const waiting = state.teams.filter((t) => !assigned.has(t.id) && (!onlyCheckedIn || t.checkedIn));
+    const waiting = state.teams.filter((t) => !assigned.has(t.id) && (!onlyCheckedIn || !state.settings.useCheckIn || t.checkedIn));
     let placed = 0;
     for (const t of waiting) {
       let target = null;
@@ -287,11 +330,11 @@
         if (!g.teamA || !g.teamB) reason = 'Waiting on earlier match';
         else {
           const playing = [g.teamA, g.teamB].filter((id) => busy.has(id));
-          const away = [g.teamA, g.teamB].filter((id) => !team(state, id).checkedIn);
+          const away = state.settings.useCheckIn ? [g.teamA, g.teamB].filter((id) => !team(state, id).checkedIn) : [];
           if (playing.length) {
-            reason = playing.map((id) => team(state, id).name + ' on ' + board(state, busy.get(id)).name).join(', ');
+            reason = playing.map((id) => teamLabel(team(state, id)) + ' on ' + board(state, busy.get(id)).name).join(', ');
           } else if (away.length) {
-            reason = away.map((id) => team(state, id).name).join(', ') + ' not checked in';
+            reason = away.map((id) => teamLabel(team(state, id))).join(', ') + ' not checked in';
           }
         }
         return { game: g, ready: !reason, reason };
@@ -317,7 +360,7 @@
     if (gameOnBoard(state, b.id)) fail(b.name + ' already has a game on it.');
     const busy = busyTeams(state);
     for (const id of [g.teamA, g.teamB]) {
-      if (busy.has(id)) fail(team(state, id).name + ' is already playing on ' + board(state, busy.get(id)).name + '.');
+      if (busy.has(id)) fail(teamLabel(team(state, id)) + ' is already playing on ' + board(state, busy.get(id)).name + '.');
     }
     g.status = 'called';
     g.boardId = b.id;
@@ -567,8 +610,11 @@
     busyTeams,
     setBoardCount,
     renameBoard,
+    migrate,
+    teamLabel,
+    parseTeamLine,
     addTeam,
-    renameTeam,
+    updateTeam,
     setCheckedIn,
     removeTeam,
     playedPoolGames,
