@@ -191,7 +191,7 @@ test('teams get numbers and player names', () => {
   const d = L.addTeam(s, 'The Bag Slingers');
   assert.deepEqual([a, b, c, d].map((t) => t.number), [1, 2, 3, 4]);
   assert.deepEqual(a.players, ['Dave Smith', 'Tripp Jones']);
-  assert.equal(L.teamLabel(a), 'Dave Smith & Tripp Jones');
+  assert.equal(L.teamLabel(a), 'Dave S. & Tripp J.');
   assert.deepEqual([c.name, c.players], ['Sharpshooters', ['Clint', 'David P']]);
   assert.deepEqual([d.name, d.players], ['The Bag Slingers', []]);
   assert.throws(() => L.addTeam(s, 'chris and stewart'), /already/);
@@ -208,4 +208,82 @@ test('older saved tournaments are upgraded', () => {
   assert.deepEqual(old.teams[0].players, []);
   assert.equal(old.settings.useCheckIn, false);
   assert.equal(old.settings.maxPoolSize, 5);
+});
+
+test('names shorten to first name and last initial', () => {
+  assert.equal(L.shortName('Dave Windham'), 'Dave W.');
+  assert.equal(L.shortName('Mary Ann van Buren'), 'Mary B.');
+  assert.equal(L.shortName('David P'), 'David P.');
+  assert.equal(L.shortName('Cher'), 'Cher');
+  // Two Dave S.'s are still different teams.
+  const s = L.newState();
+  L.addTeam(s, 'Dave Smith, Tripp Jones');
+  assert.doesNotThrow(() => L.addTeam(s, 'Dave Stone, Tripp Jacobs'));
+});
+
+test('players can be paired into teams, split, and auto-paired', () => {
+  const s = L.newState();
+  L.setGroupCount(s, 2);
+  const [g1, g2] = s.groups;
+  const ps = ['Ann Lee', 'Bob Ray', 'Cal Fox', 'Dee Hart', 'Eve Moss'].map((n, i) => L.addPlayer(s, n, i < 2 ? g1.id : g2.id));
+  const t = L.pairPlayers(s, [ps[0].id, ps[1].id]);
+  assert.equal(L.teamLabel(t), 'Ann L. & Bob R.');
+  assert.equal(t.groupId, g1.id);
+  assert.throws(() => L.pairPlayers(s, [ps[0].id, ps[2].id]), /already on team/);
+  L.updateTeam(s, t.id, { players: ['Ann Leigh', 'Bob Ray'] });
+  assert.equal(L.player(s, ps[0].id).name, 'Ann Leigh');
+  L.splitTeam(s, t.id);
+  assert.equal(s.teams.length, 0);
+  const r = L.autoPair(s, true, () => 0.5);
+  assert.deepEqual(r, { made: 2, left: 1 });
+  // Same-group pairing: the g1 players end up together.
+  const g1Team = s.teams.find((x) => x.playerIds.includes(ps[0].id));
+  assert.ok(g1Team.playerIds.includes(ps[1].id));
+  assert.equal(g1Team.groupId, g1.id);
+});
+
+test('groups total up wins and are spread across pools', () => {
+  const s = L.newState();
+  L.setPoolCount(s, 2);
+  L.setGroupCount(s, 2);
+  const [g1, g2] = s.groups;
+  ['A1', 'A2', 'B1', 'B2'].forEach((n) => L.addTeam(s, { name: n, groupId: n[0] === 'A' ? g1.id : g2.id }));
+  L.autoAssign(s);
+  for (const p of s.pools) {
+    assert.deepEqual(p.teamIds.map((id) => L.team(s, id).groupId).sort(), [g1.id, g2.id].sort());
+  }
+  for (const g of s.games) L.recordResult(s, g.id, L.team(s, g.teamA).groupId === g1.id ? 21 : 0, L.team(s, g.teamA).groupId === g1.id ? 0 : 21);
+  const st = L.groupStandings(s);
+  assert.equal(st[0].groupId, g1.id);
+  assert.deepEqual([st[0].wins, st[0].losses, st[0].teams], [2, 0, 2]);
+  L.setGroupCount(s, 1);
+  assert.ok(s.teams.filter((t) => t.groupId === g2.id).length === 0);
+});
+
+test('pool planner fills the bracket with no byes', () => {
+  // Our 2026 tournament: 31 teams, 8-team bracket -> 8 pools (seven of 4, one of 3), winners advance.
+  assert.equal(L.suggestedBracketSize(31), 8);
+  const best = L.planPools(31, 8)[0];
+  assert.deepEqual([best.pools, best.advance, best.wildcards], [8, 1, 0]);
+  assert.deepEqual(best.sizes, [4, 4, 4, 4, 4, 4, 4, 3]);
+  for (const [teams, size] of [[12, 4], [17, 4], [20, 4], [24, 8], [40, 8], [50, 16], [64, 16], [9, 2]]) {
+    const plans = L.planPools(teams, size);
+    assert.ok(plans.length, teams + ' teams');
+    for (const p of plans) {
+      assert.ok(p.minSize >= 3);
+      assert.equal(p.advance * p.pools + p.wildcards, size);
+      assert.equal(p.sizes.reduce((a, b) => a + b, 0), teams);
+    }
+  }
+});
+
+test('applying a plan rebuilds the pools', () => {
+  const s = L.newState();
+  for (let i = 0; i < 31; i++) L.addTeam(s, 'T' + i);
+  L.applyPlan(s, L.planPools(31, 8)[0]);
+  assert.equal(s.pools.length, 8);
+  assert.deepEqual(s.pools.map((p) => p.teamIds.length).sort(), [3, 4, 4, 4, 4, 4, 4, 4]);
+  assert.equal(s.settings.advancePerPool, 1);
+  L.recordResult(s, s.games[0].id, 21, 3);
+  assert.throws(() => L.applyPlan(s, L.planPools(31, 8)[0]), /already started/);
 });

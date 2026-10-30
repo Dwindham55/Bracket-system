@@ -64,8 +64,13 @@
     }
     const pools = s.pools.filter((p) => p.teamIds.length);
     if (!pools.length) return '<h2>Pools</h2><p class="dim">Pools will appear here once teams are placed.</p>';
-    const pages = Math.ceil(pools.length / POOLS_PER_PAGE);
+    const poolPages = Math.ceil(pools.length / POOLS_PER_PAGE);
+    const showGroups = s.settings.useGroups && s.groups.length > 0;
+    const pages = poolPages + (showGroups ? 1 : 0);
     page = page % pages;
+    if (page === poolPages) {
+      return '<h2>Church standings <span class="dim">' + (page + 1) + ' / ' + pages + '</span></h2><div class="dgroups">' + U.groupTable(s) + '</div>';
+    }
     const shown = pools.slice(page * POOLS_PER_PAGE, (page + 1) * POOLS_PER_PAGE);
     return (
       '<h2>Pool standings' + (pages > 1 ? ' <span class="dim">' + (page + 1) + ' / ' + pages + '</span>' : '') + '</h2><div class="dpools">' +

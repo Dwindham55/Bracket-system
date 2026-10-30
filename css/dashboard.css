@@ -121,5 +121,10 @@ body.idle { cursor: none; }
 .dteam-players { color: var(--dim); font-size: .85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pop-team-line { justify-content: center; }
 .pop-team-num { background: var(--gold); font-size: 1.4em; }
-.pop-team-name { font-size: 2.4em; font-weight: 800; line-height: 1.15; }
+.pop-team-name { font-size: 2.1em; font-weight: 800; line-height: 1.15; }
 .pop-team-players { font-size: 1.3em; color: var(--dim); }
+
+.dteam-group { color: var(--gold); font-size: .75em; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pop-team-group { color: var(--gold); font-size: 1.2em; font-weight: 700; }
+.dgroups { background: var(--panel); border-radius: .6em; padding: .6em 1em; max-width: 60vw; font-size: 1.2em; }
+.nw { white-space: nowrap; }

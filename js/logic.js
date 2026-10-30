@@ -33,8 +33,12 @@
         diffCap: 0,
         autoCall: true,
         useCheckIn: false,
+        useGroups: false,
+        bracketSize: 0,
       },
       boards: [],
+      groups: [],
+      players: [],
       teams: [],
       pools: [],
       games: [],
@@ -52,11 +56,15 @@
     state.settings = Object.assign({}, fresh.settings, state.settings);
     if (state.settings.useCheckIn === undefined) state.settings.useCheckIn = false;
     state.announcements = state.announcements || [];
+    state.groups = state.groups || [];
+    state.players = state.players || [];
     let next = Math.max(0, ...state.teams.map((t) => t.number || 0)) + 1;
     for (const t of state.teams) {
       if (!t.number) t.number = next++;
       if (!Array.isArray(t.players)) t.players = [];
       if (t.name === undefined) t.name = '';
+      if (!Array.isArray(t.playerIds)) t.playerIds = [];
+      if (t.groupId === undefined) t.groupId = null;
     }
     return state;
   }
@@ -67,6 +75,8 @@
   const pool = (state, id) => state.pools.find((p) => p.id === id);
   const game = (state, id) => state.games.find((g) => g.id === id);
   const board = (state, id) => state.boards.find((b) => b.id === id);
+  const group = (state, id) => state.groups.find((g) => g.id === id);
+  const player = (state, id) => state.players.find((p) => p.id === id);
   const poolOfTeam = (state, teamId) => state.pools.find((p) => p.teamIds.includes(teamId));
   const gameOnBoard = (state, boardId) =>
     state.games.find((g) => g.status === 'called' && g.boardId === boardId);
@@ -108,11 +118,21 @@
 
   const clean = (v) => String(v || '').trim().replace(/\s+/g, ' ');
 
+  // "Dave Windham" -> "Dave W.". Single names stay as they are.
+  function shortName(full) {
+    const parts = clean(full).split(' ');
+    if (parts.length < 2) return parts[0] || '';
+    return parts[0] + ' ' + parts[parts.length - 1][0].toUpperCase() + '.';
+  }
+
   // What a team is called on screen: its team name, or else its players.
   function teamLabel(t) {
     if (!t) return 'TBD';
-    return t.name || t.players.filter(Boolean).join(' & ') || 'Team ' + t.number;
+    return t.name || t.players.filter(Boolean).map(shortName).join(' & ') || 'Team ' + t.number;
   }
+
+  // Full names, used to tell teams apart when the short names match.
+  const fullLabel = (t) => (t.name || t.players.filter(Boolean).join(' & ')).toLowerCase();
 
   // Read one typed line into a team. Accepts "Dave Smith, Tripp Jones",
   // "Dave & Tripp", "Sharpshooters: Dave, Tripp", or just "Sharpshooters".
@@ -134,17 +154,22 @@
     const name = clean(info.name);
     const players = (info.players || []).map(clean).filter(Boolean).slice(0, 4);
     if (!name && !players.length) fail('Enter the players’ names or a team name.');
-    const label = teamLabel({ name, players }).toLowerCase();
-    const dupe = state.teams.find((o) => o.id !== teamId && teamLabel(o).toLowerCase() === label);
-    if (dupe) fail('Team #' + dupe.number + ' is already called "' + teamLabel(dupe) + '".');
-    return { name, players };
+    const label = fullLabel({ name, players });
+    const dupe = state.teams.find((o) => o.id !== teamId && fullLabel(o) === label);
+    if (dupe) fail('Team #' + dupe.number + ' is already "' + teamLabel(dupe) + '".');
+    const out = { name, players };
+    if (info.groupId !== undefined) out.groupId = info.groupId && group(state, info.groupId) ? info.groupId : null;
+    return out;
   }
 
   function addTeam(state, info, checkedIn = true) {
     if (typeof info === 'string') info = parseTeamLine(info);
-    const { name, players } = checkTeamInfo(state, info);
+    const { name, players, groupId = null } = checkTeamInfo(state, info);
     const number = Math.max(0, ...state.teams.map((t) => t.number || 0)) + 1;
-    const t = { id: uid(), number, name, players, checkedIn: !!checkedIn || !state.settings.useCheckIn, createdAt: Date.now() };
+    const t = {
+      id: uid(), number, name, players, groupId, playerIds: info.playerIds || [],
+      checkedIn: !!checkedIn || !state.settings.useCheckIn, createdAt: Date.now(),
+    };
     state.teams.push(t);
     return t;
   }
@@ -152,6 +177,130 @@
   function updateTeam(state, teamId, info) {
     const t = team(state, teamId) || fail('Team not found.');
     Object.assign(t, checkTeamInfo(state, { name: t.name, players: t.players, ...info }, teamId));
+    // Keep the Players list in step when names are fixed on the Teams tab.
+    t.playerIds.forEach((pid, i) => {
+      const pl = player(state, pid);
+      if (pl && t.players[i]) pl.name = t.players[i];
+    });
+  }
+
+  // ---------- groups (church or other affiliation) ----------
+
+  function setGroupCount(state, count) {
+    count = Math.floor(Number(count));
+    if (!(count >= 0 && count <= 64)) fail('Number of groups must be between 0 and 64.');
+    while (state.groups.length < count) state.groups.push({ id: uid(), name: 'Group ' + (state.groups.length + 1) });
+    const removed = new Set(state.groups.slice(count).map((g) => g.id));
+    state.groups = state.groups.slice(0, count);
+    for (const x of [...state.teams, ...state.players]) if (removed.has(x.groupId)) x.groupId = null;
+  }
+
+  function renameGroup(state, groupId, name) {
+    const g = group(state, groupId) || fail('Group not found.');
+    name = clean(name);
+    if (!name) fail('Group name cannot be empty.');
+    g.name = name;
+  }
+
+  function setTeamGroup(state, teamId, groupId) {
+    const t = team(state, teamId) || fail('Team not found.');
+    t.groupId = groupId && group(state, groupId) ? groupId : null;
+  }
+
+  // Wins, losses and differential for every group, best first.
+  function groupStandings(state) {
+    const rows = new Map(state.groups.map((g) => [g.id, { groupId: g.id, teams: 0, wins: 0, losses: 0, diff: 0 }]));
+    for (const t of state.teams) if (rows.has(t.groupId)) rows.get(t.groupId).teams++;
+    for (const g of state.games) {
+      if (g.status !== 'done') continue;
+      const d = gameDiff(state, g);
+      const loser = g.winner === g.teamA ? g.teamB : g.teamA;
+      const w = rows.get((team(state, g.winner) || {}).groupId);
+      const l = rows.get((team(state, loser) || {}).groupId);
+      if (w) { w.wins++; w.diff += d; }
+      if (l) { l.losses++; l.diff -= d; }
+    }
+    return [...rows.values()].sort((a, b) => b.wins - a.wins || b.diff - a.diff);
+  }
+
+  // ---------- individual players (paired into teams) ----------
+
+  function addPlayer(state, name, groupId = null) {
+    name = clean(name);
+    if (!name) fail('Enter a name.');
+    if (state.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) fail(name + ' is already on the list.');
+    const pl = { id: uid(), name, groupId: groupId && group(state, groupId) ? groupId : null };
+    state.players.push(pl);
+    return pl;
+  }
+
+  const teamOfPlayer = (state, playerId) => state.teams.find((t) => t.playerIds.includes(playerId));
+
+  function updatePlayer(state, playerId, info) {
+    const pl = player(state, playerId) || fail('Player not found.');
+    if (info.name !== undefined) {
+      const name = clean(info.name);
+      if (!name) fail('Name cannot be empty.');
+      if (state.players.some((o) => o.id !== playerId && o.name.toLowerCase() === name.toLowerCase())) fail(name + ' is already on the list.');
+      pl.name = name;
+      const t = teamOfPlayer(state, playerId);
+      if (t) t.players[t.playerIds.indexOf(playerId)] = name;
+    }
+    if (info.groupId !== undefined) pl.groupId = info.groupId && group(state, info.groupId) ? info.groupId : null;
+  }
+
+  function removePlayer(state, playerId) {
+    if (teamOfPlayer(state, playerId)) fail('Split that team up first.');
+    state.players = state.players.filter((p) => p.id !== playerId);
+  }
+
+  function pairPlayers(state, ids) {
+    ids = [...new Set(ids)];
+    if (ids.length !== 2) fail('Pick exactly two players.');
+    const pls = ids.map((id) => player(state, id) || fail('Player not found.'));
+    for (const pl of pls) {
+      const t = teamOfPlayer(state, pl.id);
+      if (t) fail(pl.name + ' is already on team #' + t.number + '.');
+    }
+    const groupId = pls[0].groupId && pls.every((pl) => pl.groupId === pls[0].groupId) ? pls[0].groupId : null;
+    return addTeam(state, { name: '', players: pls.map((pl) => pl.name), playerIds: ids, groupId }, true);
+  }
+
+  // Split a team made from the Players list so its players can be re-paired.
+  function splitTeam(state, teamId) {
+    const t = team(state, teamId) || fail('Team not found.');
+    if (playedPoolGames(state, teamId)) fail('Team #' + t.number + ' has already played. Remove it on the Teams tab if you really want to.');
+    removeTeam(state, teamId);
+  }
+
+  // Randomly pair everyone not on a team. With sameGroup, pairs stay within
+  // a group where possible. Returns how many teams were made.
+  function autoPair(state, sameGroup = false, random = Math.random) {
+    const free = state.players.filter((p) => !teamOfPlayer(state, p.id));
+    for (let i = free.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [free[i], free[j]] = [free[j], free[i]];
+    }
+    const buckets = new Map();
+    for (const p of free) {
+      const key = sameGroup ? p.groupId || '' : '';
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(p);
+    }
+    const leftovers = [];
+    let made = 0;
+    for (const list of buckets.values()) {
+      while (list.length >= 2) {
+        pairPlayers(state, [list.pop().id, list.pop().id]);
+        made++;
+      }
+      leftovers.push(...list);
+    }
+    while (leftovers.length >= 2) {
+      pairPlayers(state, [leftovers.pop().id, leftovers.pop().id]);
+      made++;
+    }
+    return { made, left: leftovers.length };
   }
 
   function setCheckedIn(state, teamId, checkedIn) {
@@ -292,16 +441,76 @@
     const waiting = state.teams.filter((t) => !assigned.has(t.id) && (!onlyCheckedIn || !state.settings.useCheckIn || t.checkedIn));
     let placed = 0;
     for (const t of waiting) {
+      // Emptiest pool first; among equals, the one with the fewest teams
+      // from the same group, so churches are spread across pools.
+      const sameGroup = (p) => (t.groupId ? p.teamIds.filter((id) => team(state, id).groupId === t.groupId).length : 0);
       let target = null;
       for (const p of state.pools) {
         if (p.teamIds.length >= state.settings.maxPoolSize) continue;
-        if (!target || p.teamIds.length < target.teamIds.length) target = p;
+        if (
+          !target ||
+          p.teamIds.length < target.teamIds.length ||
+          (p.teamIds.length === target.teamIds.length && sameGroup(p) < sameGroup(target))
+        ) target = p;
       }
       if (!target) break;
       assignTeamToPool(state, t.id, target.id);
       placed++;
     }
     return { placed, left: waiting.length - placed };
+  }
+
+  // ---------- pool planner ----------
+
+  // Bracket size that suits a field: a power of two near a quarter of the
+  // teams, so most pools send one team through.
+  function suggestedBracketSize(teamCount) {
+    if (teamCount < 4) return 2;
+    let size = Math.pow(2, Math.round(Math.log2(teamCount / 4)));
+    size = Math.max(2, size);
+    while (size > teamCount / 2 && size > 2) size /= 2;
+    return size;
+  }
+
+  const roundRobinGames = (n) => (n * (n - 1)) / 2;
+
+  // Ways to split teamCount teams into pools that fill a bracket of
+  // bracketSize exactly, best first. Every pool has at least 3 teams and
+  // sends at least one team home.
+  function planPools(teamCount, bracketSize) {
+    const plans = [];
+    for (let pools = 1; pools <= Math.floor(teamCount / 3); pools++) {
+      const small = Math.floor(teamCount / pools);
+      const big = Math.ceil(teamCount / pools);
+      const advance = Math.floor(bracketSize / pools);
+      if (advance < 1 || advance >= small) continue;
+      const wildcards = bracketSize - advance * pools;
+      const bigCount = teamCount - small * pools;
+      const sizes = [...Array(bigCount).fill(big), ...Array(pools - bigCount).fill(small)];
+      const games = sizes.reduce((sum, n) => sum + roundRobinGames(n), 0);
+      const avg = teamCount / pools;
+      // Aim for pools of about four (three games each), avoid wildcards,
+      // and keep very large pools and many advancers rare.
+      const penalty = wildcards * 3 + Math.abs(avg - 4) * 2 + Math.max(0, big - 6) * 3 + Math.max(0, advance - 2);
+      plans.push({ pools, sizes, maxSize: big, minSize: small, advance, wildcards, games, bracketSize, penalty });
+    }
+    return plans.sort((a, b) => a.penalty - b.penalty || a.games - b.games);
+  }
+
+  // Rebuild pools to match a plan. Only allowed before any pool game is played.
+  function applyPlan(state, plan) {
+    if (state.bracket) fail('Reset the bracket first.');
+    if (state.games.some((g) => g.stage === 'pool' && g.status !== 'pending')) {
+      fail('Pool games have already started. Change pools by hand on the Pools tab.');
+    }
+    for (const p of state.pools) p.teamIds = [];
+    state.games = state.games.filter((g) => g.stage !== 'pool');
+    state.settings.maxPoolSize = Math.max(plan.maxSize, 2);
+    setPoolCount(state, plan.pools);
+    state.settings.advancePerPool = plan.advance;
+    state.settings.wildcards = plan.wildcards;
+    state.settings.bracketSize = plan.bracketSize;
+    return autoAssign(state, true);
   }
 
   // ---------- scheduling ----------
@@ -611,7 +820,24 @@
     setBoardCount,
     renameBoard,
     migrate,
+    shortName,
     teamLabel,
+    group,
+    player,
+    setGroupCount,
+    renameGroup,
+    setTeamGroup,
+    groupStandings,
+    addPlayer,
+    updatePlayer,
+    removePlayer,
+    teamOfPlayer,
+    pairPlayers,
+    splitTeam,
+    autoPair,
+    suggestedBracketSize,
+    planPools,
+    applyPlan,
     parseTeamLine,
     addTeam,
     updateTeam,

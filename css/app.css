@@ -204,3 +204,13 @@ code { background: var(--brand-soft); padding: 0 .3rem; border-radius: 4px; }
 
 .table-scroll { overflow-x: auto; }
 .table-scroll table.list input.plain { min-width: 7rem; }
+
+.tb-group { font-size: .78rem; color: var(--brand-dark); margin-left: 2.1rem; font-weight: 600; }
+.planner { border-top-color: var(--green); margin-bottom: 1rem; }
+.planner h2 { margin-top: 0; }
+.plan { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 8px; margin: .5rem 0; }
+.plan.best { border-color: var(--green); background: var(--green-soft); }
+.plan .muted { font-size: .85rem; }
+tr.picked td { background: var(--brand-soft); }
+.group-table { max-width: 36rem; background: var(--card); border-radius: var(--radius); padding: .4rem .8rem; }
+.nw { white-space: nowrap; }

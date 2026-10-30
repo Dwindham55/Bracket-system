@@ -19,10 +19,37 @@
   function teamBlock(state, id, cls = 'tb') {
     const t = id && L.team(state, id);
     if (!t) return '<div class="' + cls + '"><span class="' + cls + '-name">TBD</span></div>';
-    const players = t.name && t.players.length ? '<div class="' + cls + '-players">' + esc(t.players.join(' & ')) + '</div>' : '';
+    const players = t.name && t.players.length ? '<div class="' + cls + '-players">' + esc(t.players.map(L.shortName).join(' & ')) + '</div>' : '';
+    const g = groupName(state, t.id);
+    const grp = g ? '<div class="' + cls + '-group">' + esc(g) + '</div>' : '';
     return (
       '<div class="' + cls + '"><div class="' + cls + '-line"><span class="' + cls + '-num">#' + t.number + '</span><span class="' +
-      cls + '-name">' + esc(L.teamLabel(t)) + '</span></div>' + players + '</div>'
+      cls + '-name">' + nameParts(L.teamLabel(t)) + '</span></div>' + players + grp + '</div>'
+    );
+  }
+
+  // Keep each player's name whole when a long pair has to wrap.
+  function nameParts(label) {
+    return label.split(' & ').map((n) => '<span class="nw">' + esc(n) + '</span>').join(' & ');
+  }
+
+  // The team's church or group, when groups are turned on.
+  function groupName(state, teamId) {
+    const t = L.team(state, teamId);
+    const g = state.settings.useGroups && t && t.groupId && L.group(state, t.groupId);
+    return g ? g.name : '';
+  }
+
+  function groupTable(state) {
+    const rows = L.groupStandings(state);
+    if (!rows.length) return '<p class="muted">No groups yet</p>';
+    return (
+      '<table class="standings"><thead><tr><th></th><th>Church / group</th><th>Teams</th><th>W</th><th>L</th><th>Diff</th></tr></thead><tbody>' +
+      rows
+        .map((r, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(L.group(state, r.groupId).name) + '</td><td class="num">' + r.teams +
+          '</td><td class="num">' + r.wins + '</td><td class="num">' + r.losses + '</td><td class="num">' + fmtDiff(r.diff) + '</td></tr>')
+        .join('') +
+      '</tbody></table>'
     );
   }
 
@@ -30,7 +57,7 @@
   function spokenName(state, id) {
     const t = L.team(state, id);
     if (!t) return '';
-    const who = t.players.length ? t.players.join(' and ') : t.name;
+    const who = t.players.length ? t.players.map((n) => L.shortName(n).replace(/\.$/, '')).join(' and ') : t.name;
     return 'team ' + t.number + ', ' + who;
   }
 
@@ -149,5 +176,5 @@
     }
   }
 
-  root.UI = { esc, teamName, teamBlock, spokenName, boardName, letterOf, gameStage, matchup, fmtDiff, standingsTable, bracketHTML, chime, speak };
+  root.UI = { esc, teamName, teamBlock, groupName, groupTable, spokenName, boardName, letterOf, gameStage, matchup, fmtDiff, standingsTable, bracketHTML, chime, speak };
 })(window);
